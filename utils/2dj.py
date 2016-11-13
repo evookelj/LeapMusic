@@ -1,12 +1,12 @@
 import Leap, sys, thread, time, wave, pyaudio
 from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
-from random import randint
+from multiprocessing import Process
 from time import time, sleep
-from math import ceil
 
-global pos
-global posMul
-global rateMul
+pos = 0
+posMul = 1
+rateMul = 1
+prevCirc = 0
 
 class SampleListener(Leap.Listener):
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
@@ -14,73 +14,78 @@ class SampleListener(Leap.Listener):
     state_names = ['STATE_INVALID', 'STATE_START', 'STATE_UPDATE', 'STATE_END']
 
     def on_init(self, controller):
-        print "Initialized"
-        self.play(controller)
+        global posMul
+        global rateMul
+        posMul = 1
+        rateMul = 1
+        p1 = Process(target = self.play(controller))
+        p1.start()
+        p2 = Process(target = self.on_frame(controller))
+        p2.start()
 
     def on_connect(self, controller):
-        print "Connected"
-        # Enable gestures
         controller.enable_gesture(Leap.Gesture.TYPE_CIRCLE);
         controller.enable_gesture(Leap.Gesture.TYPE_KEY_TAP);
         controller.enable_gesture(Leap.Gesture.TYPE_SCREEN_TAP);
         controller.enable_gesture(Leap.Gesture.TYPE_SWIPE);
 
-    def posMult(self, controller):
+    def posMult(self, gest):
         global posMul
-        frame = controller.frame()
-        for gest in frame.gestures():
-            if gest.type == Leap.Gesture.TYPE_CIRCLE:
-                print "Circle!"
-                circle = CircleGesture(gest)
-                clockwise= (circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/2)
-                if clockwise:
-                    print "SPEED UP"
-                    posMul = 1.01
-                else:
-                    print "SLOW DOWN"
-                    posMul = .99
+        if gest is None:
+            posMul = 1
+            return
+        if gest.type == Leap.Gesture.TYPE_CIRCLE:
+            print "Circle!"
+            circle = CircleGesture(gest)
+            clockwise= (circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/2)
+            if clockwise:
+                print "SKIP FORWARD"
+                posMul = 1.1
             else:
-                print gest.type
+                print "REWIND"
+                posMul = .9
         posMul = 1
-
-    def rateMult(self, controller):
+            
+    def rateMult(self, gest):
         global rateMul
-        frame = controller.frame()
-        for gest in frame.gestures():
-            if gest.type == Leap.Gesture.TYPE_SWIPE:
-                swipe = SwipeGesture(gest)
-                print swipe.direction
+        if gest is None:
+            rateMul = 1
+            return
+        if gest.type == Leap.Gesture.TYPE_SWIPE:
+            swipe = SwipeGesture(gest)
+            print swipe.direction
+            return 1.2
         rateMul = 1
 
     def play(self, controller):
-        global pos
-        global posMul
-        global rateMul
-        f = wave.open("Optimistic.wav","rb")
-        p = pyaudio.PyAudio()
-        stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
-                    channels = f.getnchannels(),
-                        rate = int(f.getframerate()*rateMul),
-                        output = True)
-        data = f.readframes(1024)
-        start = time()
-        try:
-            f.setpos(pos)
-        except:
-            f.rewind()
-        while (time() - start) < 5:
-            stream.write(data)
+        while True:
+            global pos
+            global posMul
+            global rateMul
+            f = wave.open("Optimistic.wav","rb")
+            p = pyaudio.PyAudio()
+            stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
+                            channels = f.getnchannels(),
+                            rate = int(f.getframerate()*rateMul),
+                            output = True)
             data = f.readframes(1024)
             try:
-                f.setpos(int(f.tell()*posMul))
+                f.setpos(pos)
             except:
                 f.rewind()
-        pos = f.tell()
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        self.on_frame(controller)
-
+            start = time()
+            while time() - start < 2:
+                stream.write(data)
+                data = f.readframes(1024)
+                try:
+                    f.setpos(f.tell()*posMul)
+                except:
+                    f.rewind()
+            pos = f.tell()
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            
     def on_disconnect(self, controller):
         # Note: not dispatched when running in a debugger.
         print "Disconnected"
@@ -88,16 +93,32 @@ class SampleListener(Leap.Listener):
     def on_exit(self, controller):
         print "Exited"
 
+    def getGest(self, controller):
+        global prevCirc
+        # Get the most recent frame and report some basic information
+        frame = controller.frame()
+        # Get gestures
+        for gesture in frame.gestures():
+            if gesture.type == Leap.Gesture.TYPE_CIRCLE \
+            or gesture.type == Leap.Gesture.TYPE_SWIPE \
+            or gesture.type == Leap.Gesture.TYPE_KEY_TAP \
+            or gesture.type == Leap.Gesture.TYPE_SCREEN_TAP:
+                if gesture.type == Leap.Gesture.TYPE_CIRCLE:
+                    circle = CircleGesture(gesture)
+                    if int(circle.progress) == 1 and time()-prevCirc > 4:
+                        prevCirc = time()
+                        return gesture
+                    else:
+                        return None
+                return gesture
+        return None
+
+
     #on frame not being run?
     def on_frame(self, controller):
-        frame = controller.frame()
-        self.posMult(controller)
-        self.rateMult(controller)
-        print "GESTURES"
-        for gest in frame.gestures():
-            print gest.type
-        print "\n"
-        self.play(controller)
+        gest = self.getGest(controller)
+        self.posMult(gest)
+        self.rateMult(gest)
         
 def main():
     # Create a sample listener and controller
