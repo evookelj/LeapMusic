@@ -5,7 +5,8 @@ from time import time, sleep
 from math import ceil
 
 global pos
-global prevFrame
+global posMul
+global rateMul
 
 class SampleListener(Leap.Listener):
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
@@ -13,9 +14,8 @@ class SampleListener(Leap.Listener):
     state_names = ['STATE_INVALID', 'STATE_START', 'STATE_UPDATE', 'STATE_END']
 
     def on_init(self, controller):
-        global prevFrame
-        prevFrame = 0
         print "Initialized"
+        self.play(controller)
 
     def on_connect(self, controller):
         print "Connected"
@@ -26,58 +26,60 @@ class SampleListener(Leap.Listener):
         controller.enable_gesture(Leap.Gesture.TYPE_SWIPE);
 
     def posMult(self, controller):
+        global posMul
         frame = controller.frame()
         for gest in frame.gestures():
             if gest.type == Leap.Gesture.TYPE_CIRCLE:
+                print "Circle!"
                 circle = CircleGesture(gest)
                 clockwise= (circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/2)
                 if clockwise:
                     print "SPEED UP"
-                    return 1.01
+                    posMul = 1.01
                 else:
                     print "SLOW DOWN"
-                    return .99
+                    posMul = .99
             else:
                 print gest.type
-        return 1
+        posMul = 1
 
     def rateMult(self, controller):
-        global rate
+        global rateMul
         frame = controller.frame()
         for gest in frame.gestures():
             if gest.type == Leap.Gesture.TYPE_SWIPE:
                 swipe = SwipeGesture(gest)
                 print swipe.direction
-        return 1
+        rateMul = 1
 
     def play(self, controller):
-        ctr = 0
         global pos
-        while ctr < 10000:
-            f = wave.open("Optimistic.wav","rb")
-            p = pyaudio.PyAudio()
-            stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
-                            channels = f.getnchannels(),
-                            rate = int(f.getframerate()*self.rateMult(controller)),
-                            output = True)
+        global posMul
+        global rateMul
+        f = wave.open("Optimistic.wav","rb")
+        p = pyaudio.PyAudio()
+        stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
+                    channels = f.getnchannels(),
+                        rate = int(f.getframerate()*rateMul),
+                        output = True)
+        data = f.readframes(1024)
+        start = time()
+        try:
+            f.setpos(pos)
+        except:
+            f.rewind()
+        while (time() - start) < 5:
+            stream.write(data)
             data = f.readframes(1024)
-            start = time()
             try:
-                f.setpos(pos)
+                f.setpos(int(f.tell()*posMul))
             except:
                 f.rewind()
-            while (time() - start) < 5:
-                stream.write(data)
-                data = f.readframes(1024)
-                try:
-                    f.setpos(int(f.tell()*self.posMult(controller)))
-                except:
-                    f.rewind()
-            pos = f.tell()
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
-        print "SWITCH"
+        pos = f.tell()
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+        self.on_frame(controller)
 
     def on_disconnect(self, controller):
         # Note: not dispatched when running in a debugger.
@@ -88,13 +90,15 @@ class SampleListener(Leap.Listener):
 
     #on frame not being run?
     def on_frame(self, controller):
-        global prevFrame
         frame = controller.frame()
-        while (frame.id == prevFrame):
-            print "curr: %d, prev: %d"%(frame.id, prevFrame.id)
-            frame = controller.frame()
-        prevFrame = frame.id
-
+        self.posMult(controller)
+        self.rateMult(controller)
+        print "GESTURES"
+        for gest in frame.gestures():
+            print gest.type
+        print "\n"
+        self.play(controller)
+        
 def main():
     # Create a sample listener and controller
     listener = SampleListener()
