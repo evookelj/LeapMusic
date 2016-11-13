@@ -9,6 +9,10 @@
 import Leap, sys, thread, time, wave, pyaudio
 from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 from random import randint
+from time import time
+
+pos = 0
+rate = -1
 
 class SampleListener(Leap.Listener):
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
@@ -34,133 +38,109 @@ class SampleListener(Leap.Listener):
     def on_exit(self, controller):
         print "Exited"
 
+    def getRate(self, frame, toSet):
+        global rate
+        for gest in frame.gestures():
+            found = False
+            if gest.type == Leap.Gesture.TYPE_KEY_TAP:
+                tap = KeyTapGesture(gest)
+                found = True
+            if gest.type == Leap.Gesture.TYPE_SCREEN_TAP:
+                tap = ScreenTapGesture(gest)
+                found = True
+            if found:
+                print "DIRECTION: "
+                print tap.direction
+        #if toSet:
+            #set Rate to help
+        return 0
+
+    def spin(self, frame, toSet):
+        global pos
+        ret = -1
+        for gest in frame.gestures():
+            if gest.type == Leap.Gesture.TYPE_CIRCLE:
+                circle = CircleGesture(gest)
+                if circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/2:
+                    ret = pos*.8
+                else:
+                    ret = pos*1.2
+        if toSet:
+            pos = ret
+        return ret
+
+    def play(self):
+        global rate
+        global pos
+        f = wave.open("Optimistic.wav","rb")
+        if pos == 0:
+            f.rewind()
+        else:
+            f.setpos(rate)
+        pos = f.tell()
+        p = pyaudio.PyAudio()
+        if rate == 0:
+            rRate = f.getframerate()
+        else:
+            rRate = rate
+        stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
+                        channels = f.getnchannels(),
+                        rate = rRate,
+                        output = True)
+        data = f.readframes(1024)
+        start2 = time()
+        while data != "":
+            stream.write(data)
+            data = f.readframes(1024)
+        pos = f.tell()
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
     def on_frame(self, controller):
-        # Get the most recent frame and report some basic information
+        global pos
         frame = controller.frame()
+        self.getRate(frame,False)
+        self.spin(frame,False)
 
         """
-        print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d, gestures: %d" % (
-              frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools), len(frame.gestures()))
-
-        # Get hands
-        for hand in frame.hands:
-
-            handType = "Left hand" if hand.is_left else "Right hand"
-
-            print "  %s, id %d, position: %s" % (
-                handType, hand.id, hand.palm_position)
-
-            # Get the hand's normal vector and direction
-            normal = hand.palm_normal
-            direction = hand.direction
-
-            # Calculate the hand's pitch, roll, and yaw angles
-            print "  pitch: %f degrees, roll: %f degrees, yaw: %f degrees" % (
-                direction.pitch * Leap.RAD_TO_DEG,
-                normal.roll * Leap.RAD_TO_DEG,
-                direction.yaw * Leap.RAD_TO_DEG)
-
-            # Get arm bone
-            arm = hand.arm
-            print "  Arm direction: %s, wrist position: %s, elbow position: %s" % (
-                arm.direction,
-                arm.wrist_position,
-                arm.elbow_position)
-
-            # Get fingers
-            for finger in hand.fingers:
-
-                print "    %s finger, id: %d, length: %fmm, width: %fmm" % (
-                    self.finger_names[finger.type],
-                    finger.id,
-                    finger.length,
-                    finger.width)
-
-                # Get bones
-                for b in range(0, 4):
-                    bone = finger.bone(b)
-                    print "      Bone: %s, start: %s, end: %s, direction: %s" % (
-                        self.bone_names[bone.type],
-                        bone.prev_joint,
-                        bone.next_joint,
-                        bone.direction)
-
-        # Get tools
-        for tool in frame.tools:
-
-            print "  Tool id: %d, position: %s, direction: %s" % (
-                tool.id, tool.tip_position, tool.direction)
-"""
-        # Get gestures
-        for gesture in frame.gestures():
-            CHANNELS = 1
-            swidth=2
-            Change_RATE = 2
-            f = wave.open("Optimistic.wav","rb")
-            p = pyaudio.PyAudio(rate=1)
-            stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
-                            channels = f.getnchannels(),
-                            rate = f.getframerate(),
-                            output = True)
-            data = f.readframes(1024)
-            while data!="":
-                stream.write(data)
-                data = f.readframes(1024)
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
-            """
-            RATE = spf.getframerate()
-            signal = spf.readframes(-1)
-            wf = wave.open('changed.wav', 'wb')
-            wf.setnchannels(CHANNELS)
-            wf.setsampwidth(swidth)
-            wf.setframerate(RATE*Change_RATE)
-            wf.writeframes(signal)
-            wf.close()
-"""
+        if gesture.type == Leap.Gesture.TYPE_CIRCLE:
+            circle = CircleGesture(gesture)
             
-            if gesture.type == Leap.Gesture.TYPE_CIRCLE:
-                circle = CircleGesture(gesture)
-
-                # Determine clock direction using the angle between the pointable and the circle normal
-                if circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/2:
-                    clockwiseness = "clockwise"
-                else:
-                    clockwiseness = "counterclockwise"
-
+            # Determine clock direction using the angle between the pointable and the circle normal
+            if circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/2:
+                clockwiseness = "clockwise"
+            else:
+                clockwiseness = "counterclockwise"
+                
                 # Calculate the angle swept since the last frame
                 swept_angle = 0
-                if circle.state != Leap.Gesture.STATE_START:
-                    previous_update = CircleGesture(controller.frame(1).gesture(circle.id))
-                    swept_angle =  (circle.progress - previous_update.progress) * 2 * Leap.PI
-
+            if circle.state != Leap.Gesture.STATE_START:
+                previous_update = CircleGesture(controller.frame(1).gesture(circle.id))
+                swept_angle =  (circle.progress - previous_update.progress) * 2 * Leap.PI
+                    
                 print "  Circle id: %d, %s, progress: %f, radius: %f, angle: %f degrees, %s" % (
-                        gesture.id, self.state_names[gesture.state],
-                        circle.progress, circle.radius, swept_angle * Leap.RAD_TO_DEG, clockwiseness)
-
+                    gesture.id, self.state_names[gesture.state],
+                    circle.progress, circle.radius, swept_angle * Leap.RAD_TO_DEG, clockwiseness)
+                
             if gesture.type == Leap.Gesture.TYPE_SWIPE:
                 swipe = SwipeGesture(gesture)
                 print "  Swipe id: %d, state: %s, position: %s, direction: %s, speed: %f" % (
-                        gesture.id, self.state_names[gesture.state],
-                        swipe.position, swipe.direction, swipe.speed)
-
+                    gesture.id, self.state_names[gesture.state],
+                    swipe.position, swipe.direction, swipe.speed)
+                    
             if gesture.type == Leap.Gesture.TYPE_KEY_TAP:
                 keytap = KeyTapGesture(gesture)
                 print "  Key Tap id: %d, %s, position: %s, direction: %s" % (
-                        gesture.id, self.state_names[gesture.state],
-                        keytap.position, keytap.direction )
-
+                    gesture.id, self.state_names[gesture.state],
+                    keytap.position, keytap.direction )
+                
             if gesture.type == Leap.Gesture.TYPE_SCREEN_TAP:
                 screentap = ScreenTapGesture(gesture)
                 print "  Screen Tap id: %d, %s, position: %s, direction: %s" % (
-                        gesture.id, self.state_names[gesture.state],
-                        screentap.position, screentap.direction )
-
-        """
-        if not (frame.hands.is_empty and frame.gestures().is_empty):
-            print ""
-          """
+                    gesture.id, self.state_names[gesture.state],
+                    screentap.position, screentap.direction )
+"""
 
     def state_string(self, state):
         if state == Leap.Gesture.STATE_START:
@@ -185,6 +165,8 @@ def main():
 
     # Keep this process running until Enter is pressed
     print "Press Enter to quit..."
+    while (True):
+        listener.play()
     try:
         sys.stdin.readline()
     except KeyboardInterrupt:
@@ -195,18 +177,4 @@ def main():
 
 
 if __name__ == "__main__":
-    f = wave.open("Optimistic.wav","rb")
-    p = pyaudio.PyAudio()
-    rRate = randint(48000-36000,48000+36000)
-    stream = p.open(format = p.get_format_from_width(f.getsampwidth()),
-                    channels = f.getnchannels(),
-                    rate = rRate,
-                    output = True)
-    data = f.readframes(1024)
-    while data!="":
-        stream.write(data)
-        data = f.readframes(1024)
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
     main()
